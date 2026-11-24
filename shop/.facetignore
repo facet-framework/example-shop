@@ -1,0 +1,19 @@
+# Files FACET never needs to read.
+#
+# Every scan for @facet: anchors opens each file this does not exclude, and a
+# repository usually holds a lot that can never carry one: rendered audio,
+# images, fonts, compiled output, generated bundles.
+#
+# This file ships empty on purpose. What is irrelevant is a judgement about
+# this repository, and a scaffold that guessed would either miss what matters
+# here or hide something that does carry anchors. Fill it in once, from what is
+# actually in the tree. Media and documents are the usual answer.
+#
+# Syntax is .gitignore's, one pattern per line, applying to this directory and
+# everything below. This is not .gitignore: excluding a file here says nothing
+# about whether it is versioned.
+#
+# Example, once you know the tree:
+#   *.mp3
+#   *.png
+tools/facet-lint/

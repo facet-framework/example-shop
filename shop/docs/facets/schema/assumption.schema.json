@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/assumption.schema.json",
+  "title": "FACET Assumption Record",
+  "description": "Schema for a FACET assumption record (FACET specification, Appendix A.3).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "statement",
+    "review_by",
+    "criticality",
+    "risk_if_false"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "FACET schema version. Must be '0.1'."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^assumption/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$",
+      "description": "Canonical assumption ID in the form assumption/<domain>/<name> (lowercase kebab-case)."
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 20,
+      "description": "The assumption being made. Written as a positive declarative statement (e.g. 'The host operating system provides a hardware-backed secure enclave accessible via the platform keychain API.')."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/evidence_item"
+      },
+      "description": "Evidence supporting this assumption. An empty array means the assumption is unvalidated.",
+      "default": []
+    },
+    "review_by": {
+      "type": "string",
+      "description": "ISO 8601 date by which this assumption must be reviewed. If the date has passed the assumption is stale."
+    },
+    "criticality": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "How severely incorrect assumptions would impact the system. 'critical' means the feature cannot function safely if false."
+    },
+    "risk_if_false": {
+      "type": "string",
+      "description": "Description of the consequences if this assumption turns out to be incorrect."
+    },
+    "referenced_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Feature IDs (domain/capability/feature) or policy IDs (policy/<domain>/<name>) that rely on this assumption.",
+      "default": []
+    }
+  },
+  "definitions": {
+    "evidence_item": {
+      "type": "object",
+      "required": [
+        "type",
+        "reference",
+        "date"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Category of evidence (e.g. 'vendor-sla', 'benchmark', 'audit-report', 'design-doc', 'test-result')."
+        },
+        "reference": {
+          "type": "string",
+          "description": "URL, file path, or document title that constitutes the evidence."
+        },
+        "date": {
+          "type": "string",
+          "description": "ISO 8601 date when this evidence was collected or published."
+        }
+      }
+    }
+  }
+}

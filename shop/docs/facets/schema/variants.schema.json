@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/variants.schema.json",
+  "title": "FACET Variant Map",
+  "description": "Declares a deployment's variants and the paths belonging to each. A variant is an independently deployable place where a feature can exist or not exist: clients, but also backends, workers and pipelines whenever 'does this feature exist there yet?' has its own answer. A rewrite duplicates all of those, so restricting variants to clients would classify legacy/api and v2/api as shared code — which is doubly wrong, since they are competing rather than shared, and it would make 'the backend is migrated, the web client is not' inexpressible. Genuinely shared libraries and infrastructure go under 'shared'; they are anchored like any other code but prove no variant.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "variants"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "0.1"
+      ],
+      "description": "FACET schema family this map was written under."
+    },
+    "variants": {
+      "type": "object",
+      "description": "Surfaces, keyed by the name records use in their 'variants' block.",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]*$": {
+          "type": "object",
+          "required": [
+            "paths"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "paths": {
+              "$ref": "#/definitions/paths"
+            },
+            "description": {
+              "type": "string",
+              "description": "What this variant is, for a reader who does not already know."
+            },
+            "replaces": {
+              "type": "string",
+              "description": "Another declared variant that this one is replacing. How a rewrite is modelled: v2-api replaces legacy-api, both exist while the migration runs, and per-variant lifecycle shows how far it has got. Used for reporting — grouping by migration, counting what remains, listing what blocks retiring the old variant. It drives no lint on purpose: a check firing on every unmigrated feature would warn once per record for the duration of the migration."
+            }
+          }
+        }
+      }
+    },
+    "shared": {
+      "type": "object",
+      "description": "Code belonging to no single variant: shared libraries and infrastructure serving several of them without being one. Anchors here resolve for navigation and drift detection but satisfy no variant's presence requirement. Two competing implementations of the same thing — legacy and its rewrite — are not shared; they are separate variants.",
+      "required": [
+        "paths"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "$ref": "#/definitions/paths"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "paths": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Glob patterns, relative to the repository root. Patterns may match files as well as directories, because the most common multi-variant layout there is — React Native's platform extensions — puts Button.ios.tsx and Button.web.tsx in the same directory, which a directory-only map cannot express.\n\nWhen several patterns match one file, the longest matching pattern wins, as in routing. Without that rule the order of entries decides the outcome and two readers of the same file reach different conclusions.\n\nA file matched by more than one variant at the same specificity is shared, by the same reasoning as an explicit 'shared' entry: exclusivity is the test for presence.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

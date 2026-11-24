@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/spec.schema.json",
+  "title": "FACET spec frontmatter",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "title",
+    "status",
+    "owner"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "facet-spec/0.1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(/[a-z][a-z0-9-]*)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "approved",
+        "deprecated"
+      ]
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1,
+      "default": "en"
+    },
+    "case_tag": {
+      "enum": [
+        "case",
+        "id"
+      ],
+      "default": "case"
+    }
+  }
+}

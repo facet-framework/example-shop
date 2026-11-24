@@ -1,0 +1,45 @@
+name: FACET Lint
+# Runs on every pull request. Anchors can sit anywhere in the tree, so there is
+# no paths filter: one that misses a directory stops the lint without a sound.
+# If you add one, it must cover docs/facets/** and every directory that holds
+# @facet: anchors.
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Only the FACET Core repository itself has bin/facet and no
+      # tools/facet-lint/facet; it lints with a build of its own source (below).
+      - name: Set up Go to build FACET Core from its own source
+        if: ${{ hashFiles('bin/facet') != '' && hashFiles('tools/facet-lint/facet') == '' }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install the pinned FACET Core and lint the registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The FACET dispatcher pins the Core version (its FACET_VERSION
+          # default), downloads that release from facet-framework/core without
+          # a token and checks the archive against the release's checksums.txt
+          # before it runs. 'facet init' copies it to tools/facet-lint/facet; in
+          # the FACET Core repository it is bin/facet.
+          #
+          # The FACET Core repository cannot download the version it is about
+          # to release: that release does not exist while its own pull request
+          # is checked. There the dispatcher builds the facet in this checkout
+          # (FACET_DEV_BUILD=1) and lints with it.
+          dispatcher=tools/facet-lint/facet
+          if [ ! -f "$dispatcher" ]; then
+            dispatcher=bin/facet
+            export FACET_DEV_BUILD=1
+          fi
+          sh "$dispatcher" --root "$GITHUB_WORKSPACE" lint

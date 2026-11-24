@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/glossary.schema.json",
+  "title": "FACET Project Glossary",
+  "description": "Optional naming authority for terms of art used in record prose. It carries definitions, not contracts, anchors or lifecycle. Consumers may link exact, case-sensitive, whole-word occurrences without adding references or markup to records. Without this file, glossary checks do not run.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "terms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "0.1"
+      ],
+      "description": "FACET schema family this glossary was written under."
+    },
+    "categories": {
+      "type": "array",
+      "description": "Optional flat category list in display order. Categories have no parents or children. Terms may reference one declared category. Undeclared references and duplicate IDs are errors; unused categories produce warnings. Without categories, terms remain an ungrouped list.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/category"
+      }
+    },
+    "terms": {
+      "type": "array",
+      "description": "Terms in project-defined order. Each entry carries its own name and definition; names may contain spaces.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/term"
+      }
+    }
+  },
+  "definitions": {
+    "category": {
+      "type": "object",
+      "required": [
+        "id",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Stable category slug referenced by terms, using the taxonomy segment grammar. The display title can change without changing references.",
+          "maxLength": 60
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required display heading in the product's language, distinct from the stable category ID.",
+          "maxLength": 120
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional description of which terms belong in the category.",
+          "maxLength": 300
+        }
+      }
+    },
+    "term": {
+      "type": "object",
+      "required": [
+        "term",
+        "definition"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "term": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact word or phrase used in record prose. Matching is case-sensitive and whole-word: Consignee and consignee are distinct, and neither matches inside a longer word. Duplicate term definitions are linter errors.",
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Optional reference to one declared category ID. An undeclared ID is a linter error. Absence leaves the term uncategorised and does not create an implicit Other category or assert that classification is complete.",
+          "maxLength": 60
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Meaning of the term in the product's language, including distinctions from related terms. Behavioural promises belong in record contracts rather than in this naming authority.",
+          "maxLength": 1500
+        },
+        "renderings": {
+          "type": "object",
+          "description": "Per-locale wording for the term, keyed by locale. Core currently does not interpret or validate these values beyond this schema.",
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

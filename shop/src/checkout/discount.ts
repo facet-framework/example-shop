@@ -20,6 +20,8 @@ function isExpired(code: DiscountCode, now: Date): boolean {
   return now.getTime() > Date.parse(`${code.expiresOn}T23:59:59.999Z`);
 }
 
+// @facet: checkout/discounts/redeem-code
+// @facet-role: primary
 /** Redeems a code on a cart. Returns the new cart; throws a ShopError and leaves the cart unchanged otherwise. */
 export function redeemDiscountCode(cart: Cart, input: string, now = new Date()): Cart {
   if (cart.discountCode) throw new ShopError("E2004");

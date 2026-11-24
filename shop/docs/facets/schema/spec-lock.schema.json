@@ -1,0 +1,212 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/spec-lock.schema.json",
+  "title": "FACET specification lock",
+  "type": "object",
+  "propertyNames": {
+    "type": "string",
+    "pattern": "^[a-z][a-z0-9-]*$"
+  },
+  "additionalProperties": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "repo",
+      "follow",
+      "format",
+      "files",
+      "scenarios"
+    ],
+    "properties": {
+      "repo": {
+        "type": "string",
+        "minLength": 1
+      },
+      "follow": {
+        "type": "string",
+        "minLength": 1
+      },
+      "format": {
+        "enum": [
+          "facet-spec",
+          "gherkin",
+          "openspec",
+          "speckit",
+          "gherkin-markdown",
+          "kiro",
+          "bmad",
+          "gauge"
+        ]
+      },
+      "commit": {
+        "type": "string",
+        "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+      },
+      "files": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string",
+          "pattern": "^([0-9]{3}-|[0-9]+-[0-9]+-)?[a-z][a-z0-9-]*(/([0-9]{3}-|[0-9]+-[0-9]+-)?[a-z][a-z0-9-]*)*$"
+        },
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "language"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "draft",
+                "approved",
+                "deprecated"
+              ]
+            },
+            "language": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "scenarios": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string",
+          "pattern": "^([0-9]{3}-|[0-9]+-[0-9]+-)?[a-z][a-z0-9-]*(/([0-9]{3}-|[0-9]+-[0-9]+-)?[a-z][a-z0-9-]*)*#[a-z][a-z0-9-]*$"
+        },
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit",
+            "steps"
+          ],
+          "if": {
+            "required": [
+              "binding"
+            ],
+            "properties": {
+              "binding": {
+                "const": "provenance"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "sequence": false,
+              "context": false
+            }
+          },
+          "else": {
+            "required": [
+              "context",
+              "sequence"
+            ],
+            "properties": {
+              "text": false
+            }
+          },
+          "properties": {
+            "commit": {
+              "type": "string",
+              "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "steps": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "context": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "binding": {
+              "enum": [
+                "exact",
+                "provenance"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "steps"
+              ],
+              "properties": {
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "text"
+                    ],
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "Unknown",
+                          "Context",
+                          "Action",
+                          "Outcome"
+                        ]
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "doc_string": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "media_type",
+                          "content"
+                        ],
+                        "properties": {
+                          "media_type": {
+                            "type": "string"
+                          },
+                          "content": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "data_table": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "examples": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

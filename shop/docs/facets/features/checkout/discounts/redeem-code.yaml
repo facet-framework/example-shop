@@ -1,0 +1,35 @@
+schema_version: "0.1"
+id: checkout/discounts/redeem-code
+lifecycle: active
+intent:
+  summary: A customer enters a discount code in the cart and gets its discount, or a reason why not.
+contract:
+  scenarios:
+    - id: expired-code-is-refused
+      statement: |
+        Given the code SPRING5, whose last day is 2026-05-31
+        When a customer redeems it after 23:59:59 UTC on that day
+        Then the shop refuses it with E2002 and the cart keeps its price
+    - id: last-day-ends-in-utc
+      statement: |
+        Given a code whose last day is today
+        When a customer redeems it at 23:30 UTC, in any time zone
+        Then the discount is applied
+    - id: minimum-order-value
+      statement: |
+        Given a code with a minimum order value
+        When the cart subtotal is below that value
+        Then the shop refuses the code with E2003
+    - id: one-code-per-order
+      statement: |
+        Given a cart that already has a code
+        When the customer enters a second code
+        Then the shop refuses it with E2004
+verification:
+  unit_tests:
+    - id: tests/discount.test.ts
+      proves: [expired-code-is-refused, last-day-ends-in-utc, minimum-order-value, one-code-per-order]
+lineage:
+  owner:
+    team: checkout
+  created_at: "2026-11-22"

@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/generation-manifest.schema.json",
+  "title": "FACET Generation Manifest",
+  "description": "Committed provenance for generated documentation (FACET §8.6), naming input resources and digests so changes can invalidate an artifact. Resource fields use in-toto ResourceDescriptor vocabulary, so a deployment that later needs signed provenance can map onto SLSA without redesigning the format.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "artifacts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": [
+        "0.1"
+      ],
+      "description": "FACET schema family this manifest was written under."
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "One entry per generated artifact, sorted by subject path so the diff stays reviewable.",
+      "items": {
+        "$ref": "#/definitions/artifact"
+      }
+    }
+  },
+  "definitions": {
+    "digest": {
+      "type": "object",
+      "required": [
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 of the file's contents. Content hashing is deliberate: git does not preserve modification times, so a timestamp comparison would mark every artifact stale after a fresh clone."
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "subject",
+        "feature",
+        "generator",
+        "inputs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "type": "object",
+          "required": [
+            "path",
+            "digest"
+          ],
+          "additionalProperties": false,
+          "description": "The generated artifact itself.",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Repository-relative path to the generated file."
+            },
+            "digest": {
+              "$ref": "#/definitions/digest"
+            }
+          }
+        },
+        "feature": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$",
+          "description": "Feature id the artifact was generated from."
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "prerequisite_knowledge",
+              "not_for",
+              "discoverability",
+              "common_pitfalls",
+              "success_signal"
+            ]
+          },
+          "description": "Knowledge slots the artifact consumed. Recording these allows per-slot staleness rather than invalidating a whole article when one unrelated slot's sources move.",
+          "default": []
+        },
+        "generator": {
+          "type": "object",
+          "required": [
+            "pipeline"
+          ],
+          "additionalProperties": false,
+          "description": "The non-hermetic part of the build. An LLM is not a deterministic compiler, so the model and prompt version are inputs: changing either invalidates the artifact exactly as a new compiler would.",
+          "properties": {
+            "pipeline": {
+              "type": "string",
+              "description": "Name of the generator pipeline."
+            },
+            "model": {
+              "type": "string",
+              "description": "Model that produced the artifact."
+            },
+            "prompt_version": {
+              "type": "string",
+              "description": "Version of the generation prompt."
+            }
+          }
+        },
+        "generated_at": {
+          "type": "string",
+          "description": "ISO 8601 date of generation (YYYY-MM-DD). Narration only — never used as a comparison key."
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Everything that fed the artifact: the feature record, plus every source file anchoring that feature at generation time. The resolved set is recorded in full, because FACET resolves anchors by scanning source — an anchor added later is a real change even when every recorded digest still matches.",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "uri",
+              "digest"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "record",
+                  "anchor",
+                  "source-artifact",
+                  "glossary"
+                ],
+                "description": "Input role: record is the feature record; anchor is implementing source; source-artifact is the source-language article; glossary is consulted terminology. A changed glossary invalidates artifacts that used it."
+              },
+              "uri": {
+                "type": "string",
+                "description": "Repository-relative path to the input."
+              },
+              "digest": {
+                "$ref": "#/definitions/digest"
+              }
+            }
+          }
+        },
+        "locale": {
+          "type": "string",
+          "description": "BCP 47 language tag for this artifact. A translation depends on the source-language article and record: a record change invalidates the source article, and its regeneration invalidates the translation. Records remain in their canonical language: two normative statements of one behaviour have no tie-break when they diverge."
+        }
+      }
+    }
+  }
+}

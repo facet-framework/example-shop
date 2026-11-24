@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/data-entity.schema.json",
+  "title": "FACET Data Entity Record",
+  "description": "Schema for a FACET data-entity record (FACET specification, Appendix A.4).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "retention",
+    "ownership"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "FACET schema version. Must be '0.1'."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^data/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$",
+      "description": "Canonical data-entity ID in the form data/<domain>/<entity> (lowercase kebab-case)."
+    },
+    "canonical_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/field"
+          },
+          "description": "Ordered list of fields in this data entity."
+        },
+        "version": {
+          "type": "string",
+          "description": "Schema version string (e.g. 'v1', '2.0.0', '2024-01-15'). Used to track schema evolution."
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "required": [
+        "policy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "type": "string",
+          "description": "Human-readable description of the retention policy for this entity (e.g. 'Delete on account erasure request', 'Retain for 7 years per financial regulations')."
+        },
+        "duration": {
+          "type": "string",
+          "description": "Maximum retention duration expressed as an ISO 8601 duration or human-readable string (e.g. 'P7Y', '90d', 'indefinite')."
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "required": [
+        "team"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "type": "string",
+          "description": "Team that owns this data entity and is responsible for its schema, migrations, and retention enforcement."
+        }
+      }
+    },
+    "read_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Feature IDs (domain/capability/feature) or team names that read this entity.",
+      "default": []
+    },
+    "mutated_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Feature IDs (domain/capability/feature) or team names that create, update, or delete records of this entity.",
+      "default": []
+    }
+  },
+  "definitions": {
+    "field": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Field name as it appears in the canonical data model."
+        },
+        "type": {
+          "type": "string",
+          "description": "Data type (e.g. 'string', 'uuid', 'bytes', 'timestamp', 'int64', 'bool', 'object')."
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Validation or database constraints applied to this field (e.g. 'not-null', 'unique', 'max-length:255', 'encrypted-at-rest').",
+          "default": []
+        },
+        "references": {
+          "type": "string",
+          "description": "If this field is a foreign key or logical reference, the data-entity ID it points to (e.g. 'data/crm/customer-account')."
+        }
+      }
+    }
+  }
+}

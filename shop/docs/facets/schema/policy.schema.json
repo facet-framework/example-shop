@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/policy.schema.json",
+  "title": "FACET Policy Record",
+  "description": "Schema for a FACET policy record (FACET specification, Appendix A.2).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "intent",
+    "contract",
+    "lineage"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "FACET schema version. Must be '0.1'."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^policy/[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$",
+      "description": "Canonical policy ID in the form policy/<domain>/<name> (lowercase kebab-case)."
+    },
+    "intent": {
+      "type": "object",
+      "required": [
+        "summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "string",
+          "description": "Human-readable description of what this policy mandates and why."
+        },
+        "regulatory_basis": {
+          "type": "string",
+          "description": "Optional reference to the regulation, standard, or internal directive that mandates this policy (e.g. 'GDPR Art. 17', 'SOC 2 CC6.1')."
+        },
+        "decision_records": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "References to ADR or other decision records that motivated this policy.",
+          "default": []
+        }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "required": [
+        "clauses"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "clauses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/clause"
+          },
+          "description": "Normative clauses that constitute this policy. Each clause has a stable ID and a requirement statement."
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "governs_features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Feature IDs (domain/capability/feature) that this policy governs.",
+          "default": []
+        },
+        "governs_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Domain names (e.g. 'billing', 'catalog') that this policy applies to in their entirety.",
+          "default": []
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compliance_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/compliance_check"
+          },
+          "description": "Automated or manual checks that verify compliance with this policy.",
+          "default": []
+        },
+        "audit_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths or URLs to audit reports, evidence logs, or certification documents.",
+          "default": []
+        }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "required": [
+        "owner",
+        "created_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "$ref": "#/definitions/owner"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "ISO 8601 date when this record was first created."
+        }
+      }
+    }
+  },
+  "definitions": {
+    "clause": {
+      "type": "object",
+      "required": [
+        "id",
+        "requirement"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identifier for this clause (e.g. 'clause-1', 'ret-30d')."
+        },
+        "requirement": {
+          "type": "string",
+          "description": "The normative requirement text for this clause (MUST/SHALL/SHOULD language preferred)."
+        }
+      }
+    },
+    "compliance_check": {
+      "type": "object",
+      "required": [
+        "id",
+        "cadence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identifier for this compliance check."
+        },
+        "cadence": {
+          "type": "string",
+          "description": "How often the check is performed (e.g. 'daily', 'quarterly', 'on-deploy')."
+        }
+      }
+    },
+    "owner": {
+      "type": "object",
+      "required": [
+        "team"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "team": {
+          "type": "string",
+          "description": "Owning team name (matches Conventional Commits scope)."
+        },
+        "individual": {
+          "type": "string",
+          "description": "Optional email of the individual DRI for this policy."
+        }
+      }
+    }
+  }
+}

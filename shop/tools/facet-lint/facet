@@ -1,0 +1,630 @@
+#!/usr/bin/env sh
+# Dispatcher for the platform-native `facet` binary (FACET Core).
+
+set -e
+
+# Whether the caller asked for a version, decided before the default fills in:
+# only an explicit request narrows which PATH binary is acceptable.
+_facet_version_explicit=
+[ -z "${FACET_VERSION:-}" ] || _facet_version_explicit=1
+
+FACET_VERSION="${FACET_VERSION:-0.1.0-rc.4}"
+FACET_UPSTREAM_REPO="facet-framework/core"
+
+# A fork extends the source list rather than replacing it, because the common
+# case for a fork is "my own build of some versions", not "every version I will
+# ever ask for". FACET_REPOS is the escape hatch for anyone who means exactly
+# that and nothing else.
+if [ -n "${FACET_REPOS:-}" ]; then
+  REPOS="$FACET_REPOS"
+elif [ -n "${FACET_REPO:-}" ]; then
+  REPOS="$FACET_REPO"
+  [ "$FACET_REPO" = "$FACET_UPSTREAM_REPO" ] || REPOS="$FACET_REPO $FACET_UPSTREAM_REPO"
+else
+  REPOS="$FACET_UPSTREAM_REPO"
+fi
+
+die() {
+  echo "facet: $*" >&2
+  exit 1
+}
+
+# The version becomes part of a directory name, an archive name and a URL, so
+# only the characters a version can carry get that far.
+case "$FACET_VERSION" in
+*[!0-9A-Za-z.+-]* | .* | *..*)
+  die "FACET_VERSION=$FACET_VERSION is not a version: only letters, digits, '.', '+' and '-' are accepted"
+  ;;
+esac
+
+resolve_plugin_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "$CLAUDE_PLUGIN_ROOT/tools/facet-lint" ]; then
+    printf '%s\n' "$CLAUDE_PLUGIN_ROOT"
+    return 0
+  fi
+  _self="$0"
+  case "$_self" in
+  */*) ;;
+  *) _self=$(command -v -- "$0" 2>/dev/null) || _self="$0" ;;
+  esac
+  CDPATH= cd -- "$(dirname -- "$_self")/.." && pwd
+}
+
+PLUGIN_ROOT=$(resolve_plugin_root)
+BASE="${CLAUDE_PLUGIN_DATA:-${XDG_CACHE_HOME:-$HOME/.cache}/facet}"
+DIST="$BASE/dist/core"
+STAGING_ROOT="$DIST/.staging"
+
+detect_platform() {
+  os=$(uname -s 2>/dev/null || echo unknown)
+  arch=$(uname -m 2>/dev/null || echo unknown)
+  case "$os" in
+  Linux) os=linux ;;
+  Darwin) os=darwin ;;
+  MINGW* | MSYS* | CYGWIN* | Windows_NT) os=windows ;;
+  *) die "unsupported operating system: $os" ;;
+  esac
+  case "$arch" in
+  x86_64 | amd64) arch=amd64 ;;
+  aarch64 | arm64) arch=arm64 ;;
+  *) die "unsupported architecture: $arch" ;;
+  esac
+  printf '%s_%s\n' "$os" "$arch"
+}
+
+archive_shape() {
+  case "$1" in
+  windows_*)
+    ARCHIVE_EXT=zip
+    BINARY_NAME=facet.exe
+    UNPACK=unzip
+    ;;
+  *)
+    ARCHIVE_EXT=tar.gz
+    BINARY_NAME=facet
+    UNPACK=tar
+    ;;
+  esac
+}
+
+archive_companions() {
+  if [ "$UNPACK" = unzip ]; then
+    unzip -Z1 "$1" 2>/dev/null | tr -d '\r' |
+      awk -v bin="$BINARY_NAME" '$0 !~ /[\/ ]/ && $0 ~ /[.][Ee][Xx][Ee]$/ && $0 != bin'
+  else
+    tar -tvzf "$1" 2>/dev/null |
+      awk -v bin="$BINARY_NAME" 'NF >= 6 && $1 ~ /^-..x/ && $NF !~ /\// && $NF != bin { print $NF }'
+  fi
+}
+
+# github-<owner>-<repo>, lowercased, every character outside [a-z0-9._-]
+# replaced by `-`, so a repository name can never escape its directory.
+distribution_for_repo() {
+  printf 'github-%s\n' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g'
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+# A JSON string value. Everything written here is a hash, a version, a
+# platform or a repository name, so escaping the two characters that could
+# break the document is enough.
+json_str() {
+  printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+# The binary of a complete install, or failure. install.json is the marker
+# that an install finished: it is the last file written into the staging
+# directory before the rename, so its presence means everything else is there.
+installed_binary() {
+  [ -f "$1/install.json" ] || return 1
+  for _name in facet facet.exe; do
+    if [ -f "$1/$_name" ] && [ -x "$1/$_name" ]; then
+      printf '%s\n' "$1/$_name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Version-free paths to whatever this dispatcher just resolved from its cache.
+
+select_install() {
+  # Relative, so the cache stays movable.
+  ln -sfn "$3" "$DIST/$1/$2/current" 2>/dev/null || true
+  ln -sfn "$1/$2/current" "$DIST/selected" 2>/dev/null || true
+}
+
+CURRENT_STAGE=
+cleanup_staging() {
+  [ -z "$CURRENT_STAGE" ] || rm -rf -- "$CURRENT_STAGE" 2>/dev/null || true
+}
+trap cleanup_staging EXIT
+trap 'cleanup_staging; exit 129' HUP
+trap 'cleanup_staging; exit 130' INT
+trap 'cleanup_staging; exit 143' TERM
+
+new_staging() {
+  mkdir -p "$STAGING_ROOT" || return 1
+  _stage=$(mktemp -d "$STAGING_ROOT/XXXXXXXX" 2>/dev/null) || {
+    _stage="$STAGING_ROOT/$$-$(date +%s 2>/dev/null || echo 0)"
+    mkdir "$_stage" || return 1
+  }
+  CURRENT_STAGE="$_stage"
+  _pkg="$_stage/install-${_stage##*/}"
+  _dl="$_stage/dl"
+  mkdir "$_pkg" "$_dl" || return 1
+}
+
+# Move the staged install $2 (inside staging directory $1) to its final
+# directory $3. Succeeds when $3 holds a complete install afterwards.
+
+commit_staging() {
+  _cs_stage="$1"
+  _cs_pkg="$2"
+  _cs_final="$3"
+  mkdir -p "$(dirname -- "$_cs_final")" || return 1
+  if [ -e "$_cs_final" ] || [ -L "$_cs_final" ]; then
+    if [ "${4:-}" = replace ] || ! installed_binary "$_cs_final" >/dev/null; then
+      mv -- "$_cs_final" "$_cs_stage/old" 2>/dev/null || true
+    fi
+  fi
+  if [ ! -e "$_cs_final" ]; then
+    # One rename on one filesystem. Should a parallel run create the final
+    # directory in between, mv puts ours *inside* theirs instead, under our
+    # unique name; that stray copy is removed again.
+    mv -- "$_cs_pkg" "$_cs_final" 2>/dev/null || true
+    # Both parts are set by the caller to paths under the cache; neither is
+    # ever empty here, so this never names "/".
+    # shellcheck disable=SC2115
+    rm -rf -- "$_cs_final/${_cs_pkg##*/}" 2>/dev/null || true
+  fi
+  rm -rf -- "$_cs_stage" 2>/dev/null || true
+  installed_binary "$_cs_final" >/dev/null
+}
+
+# install.json, written last. $1 = directory, then key=value lines on stdin;
+# a value of true/false is written as a JSON boolean.
+write_install_json() {
+  {
+    printf '{\n'
+    _first=1
+    while IFS='=' read -r _k _v; do
+      [ -n "$_k" ] || continue
+      [ "$_first" = 1 ] || printf ',\n'
+      _first=
+      case "$_v" in
+      true | false) printf '  "%s": %s' "$_k" "$_v" ;;
+      *) printf '  "%s": %s' "$_k" "$(json_str "$_v")" ;;
+      esac
+    done
+    printf '\n}\n'
+  } >"$1/install.json.tmp" && mv -- "$1/install.json.tmp" "$1/install.json"
+}
+
+# Every PATH binary that was looked at and passed over, with the reason, for
+# the final failure message. Not printed otherwise.
+REJECTED=
+reject() {
+  REJECTED="$REJECTED
+       $1 ($2)"
+}
+
+# ---------------------------------------------------------------------------
+# 1. Explicit override. A value that is not an executable file is a mistake
+# the caller needs to hear about, not a hint to look elsewhere.
+if [ -n "${FACET_BINARY:-}" ]; then
+  if [ -f "$FACET_BINARY" ] && [ -x "$FACET_BINARY" ]; then
+    exec "$FACET_BINARY" "$@"
+  fi
+  die "FACET_BINARY is set to $FACET_BINARY, which is not an executable file.
+     Point it at a facet binary, or unset it to let this dispatcher resolve one."
+fi
+
+# ---------------------------------------------------------------------------
+# 2. An explicit development build from the plugin's own source.
+
+dev_build() {
+  [ -d "$PLUGIN_ROOT/cmd/facet" ] ||
+    die "FACET_DEV_BUILD=1 needs the plugin's source, and $PLUGIN_ROOT/cmd/facet does not exist."
+  command -v go >/dev/null 2>&1 ||
+    die "FACET_DEV_BUILD=1 needs Go to build $PLUGIN_ROOT, and no go is on PATH."
+  platform=$(detect_platform)
+  archive_shape "$platform"
+  DEV_BUILD_OWN_OUTPUT=
+  _dev_hook=
+  # An optional development hook of the source tree; without it, facet is
+  # built alone.
+  if [ -f "$PLUGIN_ROOT/scripts/dev-build-hook.sh" ]; then
+    _dev_hook=1
+    # shellcheck disable=SC1091
+    . "$PLUGIN_ROOT/scripts/dev-build-hook.sh"
+  fi
+
+  _commit=
+  _dirty=
+  _built_at=
+  if command -v git >/dev/null 2>&1 &&
+    _commit=$(git -C "$PLUGIN_ROOT" rev-parse HEAD 2>/dev/null); then
+    _built_at=$(TZ=UTC git -C "$PLUGIN_ROOT" log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd 2>/dev/null) || _built_at=
+    # What that development hook rewrites (DEV_BUILD_OWN_OUTPUT) is this
+    # build's own output, so it does not make the tree it builds from dirty.
+    if _status=$(git -C "$PLUGIN_ROOT" status --porcelain -- . ${DEV_BUILD_OWN_OUTPUT:+"$DEV_BUILD_OWN_OUTPUT"} 2>/dev/null); then
+      if [ -n "$_status" ]; then _dirty=true; else _dirty=false; fi
+    fi
+  else
+    _commit=
+  fi
+
+  _dev_dir="$DIST/source/$platform/dev"
+  # Reuse only what provably matches: the same commit, built clean, from a
+  # tree that is still clean. Anything less is rebuilt.
+  if [ -n "$_commit" ] && [ "$_dirty" = false ] &&
+    _bin=$(installed_binary "$_dev_dir") &&
+    grep -q "\"source_commit\": \"$_commit\"" "$_dev_dir/install.json" &&
+    grep -q '"dirty": false' "$_dev_dir/install.json"; then
+    select_install source "$platform" dev
+    DEV_BINARY="$_bin"
+    return 0
+  fi
+
+  new_staging || die "cannot create a staging directory under $STAGING_ROOT"
+  if [ -n "$_dev_hook" ] && command -v dev_build_companions >/dev/null 2>&1; then
+    dev_build_companions "$_pkg"
+  fi
+
+  # The module path is read, not written down: it is the build's own name for
+  # the release package, whatever the module is called in this checkout.
+  _module=$(sed -n 's/^module[[:space:]]*//p' "$PLUGIN_ROOT/go.mod" 2>/dev/null | head -n 1)
+  [ -n "$_module" ] || die "FACET_DEV_BUILD=1: cannot read the module path from $PLUGIN_ROOT/go.mod"
+  _pkgpath="$_module/release"
+  _ldflags="-X $_pkgpath.Distribution=source"
+  [ -z "$_commit" ] || _ldflags="$_ldflags -X $_pkgpath.SourceCommit=$_commit"
+  [ -z "$_dirty" ] || _ldflags="$_ldflags -X $_pkgpath.Dirty=$_dirty"
+  [ -z "$_built_at" ] || _ldflags="$_ldflags -X $_pkgpath.BuildTime=$_built_at"
+  if ! (cd "$PLUGIN_ROOT" && go build -buildvcs=false -ldflags "$_ldflags" -o "$_pkg/$BINARY_NAME" ./cmd/facet) >"$_stage/build.log" 2>&1; then
+    cat "$_stage/build.log" >&2
+    die "FACET_DEV_BUILD=1: go build ./cmd/facet failed in $PLUGIN_ROOT"
+  fi
+  # The version recorded is the one the binary derives for itself.
+  _version=$("$_pkg/$BINARY_NAME" version --json 2>/dev/null |
+    sed -n 's/.*"version":"\([^"]*\)".*/\1/p') || true
+  [ -n "$_version" ] ||
+    die "FACET_DEV_BUILD=1: the binary built from $PLUGIN_ROOT does not answer 'version --json'"
+  _binsum=$(sha256_of "$_pkg/$BINARY_NAME") ||
+    die "cannot measure the build: no sha256sum or shasum available"
+  {
+    printf 'product=core\ndistribution=source\nplatform=%s\nversion=%s\nbinary_sha256=%s\n' \
+      "$platform" "$_version" "$_binsum"
+    [ -z "$_commit" ] || printf 'source_commit=%s\n' "$_commit"
+    [ -z "$_dirty" ] || printf 'dirty=%s\n' "$_dirty"
+  } | write_install_json "$_pkg" || die "cannot write install.json under $_stage"
+
+  commit_staging "$_stage" "$_pkg" "$_dev_dir" replace ||
+    die "could not move the development build into $_dev_dir"
+  # A replace that could not move the old build aside leaves the old build in
+  # place, complete, and commit_staging content. Only our own bytes count.
+  grep -q "\"binary_sha256\": \"$_binsum\"" "$_dev_dir/install.json" 2>/dev/null ||
+    die "FACET_DEV_BUILD=1: $_dev_dir does not hold the build just made (another build is in its place); not running it"
+  DEV_BINARY=$(installed_binary "$_dev_dir") ||
+    die "FACET_DEV_BUILD=1: the development build in $_dev_dir disappeared before it could run"
+  select_install source "$platform" dev
+}
+
+if [ "${FACET_DEV_BUILD:-}" = 1 ]; then
+  dev_build
+  exec "$DEV_BINARY" "$@"
+fi
+
+# ---------------------------------------------------------------------------
+# 3. A compiled facet already on PATH, but only one that says it is FACET Core
+# (and, when a version was asked for, that version).
+
+SELF_REAL=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)/$(basename -- "$0")
+# Walked by hand rather than with `command -v -a`, which dash (the /bin/sh of
+# Debian and Ubuntu) rejects as an illegal option. An empty entry means the
+# current directory, as it does for the shell's own lookup.
+_rest="$PATH:"
+while [ -n "$_rest" ]; do
+  _dir=${_rest%%:*}
+  _rest=${_rest#*:}
+  candidate="${_dir:-.}/facet"
+  [ -f "$candidate" ] && [ -x "$candidate" ] || continue
+  [ "$candidate" = "$SELF_REAL" ] && continue
+  # A directory listed twice on PATH is asked once and named once.
+  case "$REJECTED" in
+  *"
+       $candidate ("*) continue ;;
+  esac
+  case "$(head -c 2 "$candidate" 2>/dev/null)" in
+  '#!') continue ;; # another script, not the compiled binary
+  esac
+  # No stdin: the dispatcher serves MCP and LSP on stdio, and a foreign binary
+  # must not eat the client's first message. Bounded where `timeout` exists.
+  if command -v timeout >/dev/null 2>&1; then
+    _probe="timeout 5"
+  else
+    _probe=
+  fi
+  if ! _answer=$($_probe "$candidate" version --json </dev/null 2>/dev/null); then
+    reject "$candidate" "does not answer 'version --json'; a FACET 1.x binary has no such command"
+    continue
+  fi
+  case "$_answer" in
+  *'"product":"core"'*) ;;
+  *)
+    reject "$candidate" "'version --json' does not name product core"
+    continue
+    ;;
+  esac
+  if [ -n "$_facet_version_explicit" ]; then
+    # A release build reports <version>+g<commit>. Build metadata does not
+    # change which version a binary is, so the pinned version followed by "+"
+    # is the pinned version.
+    case "$_answer" in
+    *"\"version\":\"$FACET_VERSION\""* | *"\"version\":\"$FACET_VERSION+"*) ;;
+    *)
+      reject "$candidate" "is not version $FACET_VERSION, which FACET_VERSION asks for"
+      continue
+      ;;
+    esac
+  fi
+  # The first acceptable candidate replaces this script; the loop only goes on
+  # past candidates that were rejected above.
+  # shellcheck disable=SC2093
+  exec "$candidate" "$@"
+done
+
+# ---------------------------------------------------------------------------
+# 4. A complete install of this version, per source in REPOS order. Needs no
+# network and no tool beyond the shell.
+platform=$(detect_platform)
+archive_shape "$platform"
+for repo in $REPOS; do
+  _dist=$(distribution_for_repo "$repo")
+  if _bin=$(installed_binary "$DIST/$_dist/$platform/$FACET_VERSION"); then
+    select_install "$_dist" "$platform" "$FACET_VERSION"
+    exec "$_bin" "$@"
+  fi
+done
+
+FACET_TOKEN_RESOLVED=
+facet_token() {
+  [ -n "$FACET_TOKEN_RESOLVED" ] && {
+    printf '%s' "$FACET_TOKEN_CACHED"
+    return 0
+  }
+  FACET_TOKEN_RESOLVED=1
+  FACET_TOKEN_CACHED=
+  if command -v gh >/dev/null 2>&1; then
+    FACET_TOKEN_CACHED=$(gh auth token 2>/dev/null || true)
+  fi
+  [ -n "$FACET_TOKEN_CACHED" ] || FACET_TOKEN_CACHED="${GH_TOKEN:-}"
+  [ -n "$FACET_TOKEN_CACHED" ] || FACET_TOKEN_CACHED="${GITHUB_TOKEN:-}"
+  printf '%s' "$FACET_TOKEN_CACHED"
+}
+
+# GET a URL to a file.
+
+facet_get() {
+  _url="$1"
+  _out="$2"
+  _tok="${3:-}"
+  _accept="${4:-application/octet-stream}"
+  if command -v curl >/dev/null 2>&1; then
+    if [ -n "$_tok" ]; then
+      curl -fsL -H "Authorization: Bearer $_tok" -H "Accept: $_accept" "$_url" -o "$_out"
+    else
+      curl -fsL "$_url" -o "$_out"
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if [ -n "$_tok" ]; then
+      facet_wget_with_token "$_url" "$_out" "$_tok" "$_accept"
+    else
+      wget -qO "$_out" "$_url"
+    fi
+  else
+    return 1
+  fi
+}
+
+# scheme://host[:port] of a URL, nothing when it has none.
+facet_url_origin() {
+  printf '%s\n' "$1" | sed -n 's|^\([A-Za-z][A-Za-z0-9+.-]*://[^/?#]*\).*|\1|p'
+}
+
+facet_wget_with_token() {
+  _wurl="$1"
+  _wout="$2"
+  _wtok="$3"
+  _waccept="$4"
+  _worigin=$(facet_url_origin "$_wurl")
+  [ -n "$_worigin" ] || return 1
+  _whops=0
+  while [ "$_whops" -lt 5 ]; do
+    _whops=$((_whops + 1))
+    if [ "$(facet_url_origin "$_wurl")" != "$_worigin" ]; then
+      wget -qO "$_wout" "$_wurl"
+      return
+    fi
+    if _wheaders=$(wget -S --max-redirect=0 -qO "$_wout" \
+      --header="Authorization: Bearer $_wtok" --header="Accept: $_waccept" "$_wurl" 2>&1); then
+      return 0
+    fi
+    _wlocation=$(printf '%s\n' "$_wheaders" | tr -d '\r' |
+      sed -n 's/^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*//p' | tail -n 1)
+    case "$_wlocation" in
+    '') return 1 ;;
+    /*) _wurl="$_worigin$_wlocation" ;;
+    *://*) _wurl=$_wlocation ;;
+    *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+# The numeric id of one asset in one release.
+
+facet_asset_id() {
+  _repo="$1"
+  _tag="$2"
+  _file="$3"
+  _tok="$4"
+  _json="$5"
+  facet_get "https://api.github.com/repos/$_repo/releases/tags/$_tag" "$_json" "$_tok" \
+    "application/vnd.github+json" || return 1
+  grep -oE '"url"[[:space:]]*:[[:space:]]*"https://api\.github\.com/repos/[^"]+/releases/assets/[0-9]+"|"name"[[:space:]]*:[[:space:]]*"[^"]+"' "$_json" |
+    awk -v want="$_file" '
+        /releases\/assets\/[0-9]+"$/ {
+          sub(/.*\/assets\//, ""); sub(/"$/, ""); id = $0; next
+        }
+        {
+          sub(/^"name"[[:space:]]*:[[:space:]]*"/, ""); sub(/"$/, "")
+          if ($0 == want && id != "") { print id; exit }
+        }'
+}
+
+RELEASE_TAG="${FACET_RELEASE_TAG:-v$FACET_VERSION}"
+
+# Put one release file into $3, trying the cheap way before the credentialed
+# ones. Anonymous first: it is all a public fork needs, and it keeps the common
+# case free of any setup at all.
+facet_fetch_release_file() {
+  _repo="$1"
+  _file="$2"
+  _out="$3"
+  _tag="$RELEASE_TAG"
+
+  facet_get "https://github.com/$_repo/releases/download/$_tag/$_file" "$_out" "" && return 0
+
+  # `gh` knows how to reach a private release and already holds the
+  # credentials, so it is asked before the API is spoken by hand.
+  if command -v gh >/dev/null 2>&1; then
+    if gh release download "$_tag" --repo "$_repo" --pattern "$_file" --output "$_out" --clobber >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  _tok=$(facet_token)
+  [ -n "$_tok" ] || return 1
+  _id=$(facet_asset_id "$_repo" "$_tag" "$_file" "$_tok" "$_out.json") || return 1
+  rm -f "$_out.json"
+  [ -n "$_id" ] || return 1
+  facet_get "https://api.github.com/repos/$_repo/releases/assets/$_id" "$_out" "$_tok"
+}
+
+# ---------------------------------------------------------------------------
+# 5. Download the release archive, verify it, and install it under the
+# distribution of the source that served it.
+try_download() {
+  archive="facet_${FACET_VERSION}_${platform}.${ARCHIVE_EXT}"
+
+  if [ "$UNPACK" = unzip ] && ! command -v unzip >/dev/null 2>&1; then
+    die "the $platform release is a zip and no unzip is available.
+     Install unzip and ensure its executable is on PATH, or set
+     FACET_BINARY to a build you already have."
+  fi
+
+  for repo in $REPOS; do
+    new_staging || die "cannot create a staging directory under $STAGING_ROOT"
+    if ! facet_fetch_release_file "$repo" "$archive" "$_dl/$archive" ||
+      # The checksums come from the same release as the archive, never from
+      # upstream: a fork that builds its own binaries signs its own bytes, and
+      # comparing one source's archive against another's list would fail honest
+      # forks and prove nothing about dishonest ones.
+      ! facet_fetch_release_file "$repo" "checksums.txt" "$_dl/checksums.txt"; then
+      rm -rf -- "$_stage"
+      continue
+    fi
+
+    # Field equality, not a pattern: a `.` in the name must not match any
+    # character, and a second similar line must not join the answer.
+    expected=$(awk -v name="$archive" '$2 == name || $2 == "*" name { print $1; exit }' "$_dl/checksums.txt")
+    if [ -z "$expected" ]; then
+      rm -rf -- "$_stage"
+      continue
+    fi
+    actual=$(sha256_of "$_dl/$archive") ||
+      die "cannot verify the download: no sha256sum or shasum available"
+
+    [ "$actual" = "$expected" ] ||
+      die "checksum mismatch for $archive from $repo — refusing to run it"
+
+    # The member first, the whole archive as the fallback — the archive also
+    # carries README, CHANGELOG and the schemas, and unpacking those is waste
+    # rather than harm.
+    if [ "$UNPACK" = unzip ]; then
+      unzip -oq "$_dl/$archive" "$BINARY_NAME" -d "$_pkg" 2>/dev/null ||
+        unzip -oq "$_dl/$archive" -d "$_pkg" 2>/dev/null || {
+        rm -rf -- "$_stage"
+        continue
+      }
+      # A zip records a mode, and Go's writer records 0755 for the binary — but
+      # only a writer that bothers to. One that does not leaves a file that
+      # downloaded and verified and still cannot be run, so the bit is set here
+      # rather than hoped for.
+      chmod +x "$_pkg/$BINARY_NAME" 2>/dev/null || true
+      # Companion executables an archive carries land beside the binary, which
+      # looks for them there. Best-effort: an archive without any, such as a
+      # Core archive, is a complete install, not a failed download.
+      for _side in $(archive_companions "$_dl/$archive"); do
+        unzip -oq "$_dl/$archive" "$_side" -d "$_pkg" 2>/dev/null || true
+        [ -f "$_pkg/$_side" ] && chmod +x "$_pkg/$_side" 2>/dev/null || true
+      done
+    else
+      tar -xzf "$_dl/$archive" -C "$_pkg" "$BINARY_NAME" 2>/dev/null ||
+        tar -xzf "$_dl/$archive" -C "$_pkg" || {
+        rm -rf -- "$_stage"
+        continue
+      }
+      # Same reasoning as the zip branch above, for every other platform.
+      for _side in $(archive_companions "$_dl/$archive"); do
+        tar -xzf "$_dl/$archive" -C "$_pkg" "$_side" 2>/dev/null || true
+      done
+    fi
+    if ! [ -x "$_pkg/$BINARY_NAME" ]; then
+      rm -rf -- "$_stage"
+      continue
+    fi
+
+    _dist=$(distribution_for_repo "$repo")
+    _binsum=$(sha256_of "$_pkg/$BINARY_NAME")
+    printf 'product=core\ndistribution=%s\nplatform=%s\nversion=%s\nbinary_sha256=%s\narchive_sha256=%s\nsource_repo=%s\nrelease_tag=%s\n' \
+      "$_dist" "$platform" "$FACET_VERSION" "$_binsum" "$actual" "$repo" "$RELEASE_TAG" |
+      write_install_json "$_pkg" || die "cannot write install.json under $_stage"
+
+    _final="$DIST/$_dist/$platform/$FACET_VERSION"
+    commit_staging "$_stage" "$_pkg" "$_final" ||
+      die "could not move the verified install into $_final"
+    select_install "$_dist" "$platform" "$FACET_VERSION"
+    RESOLVED=$(installed_binary "$_final") ||
+      die "the install in $_final disappeared before it could run"
+    return 0
+  done
+  return 1
+}
+
+if try_download; then
+  exec "$RESOLVED" "$@"
+fi
+
+_rejected=
+[ -z "$REJECTED" ] || _rejected="
+     Passed over on PATH:$REJECTED"
+die "could not obtain facet core $FACET_VERSION for this platform.
+     Looked for: facet_${FACET_VERSION}_${platform}.${ARCHIVE_EXT} (release tag $RELEASE_TAG)
+     Tried: $REPOS${_rejected}
+     If no release of $FACET_VERSION has
+     been published to those sources, there is nothing to download. Options:
+       - FACET_VERSION=<version> to pin a version that has been released
+       - FACET_BINARY=<path> to run a facet binary you already have
+       - FACET_DEV_BUILD=1 to build this plugin's source checkout (needs Go)
+       - 'gh auth login' or GH_TOKEN if those releases are private;
+         FACET_REPO=you/facet adds your fork, FACET_REPOS sets an exact list"

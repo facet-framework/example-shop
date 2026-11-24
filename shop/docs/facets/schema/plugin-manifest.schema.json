@@ -1,0 +1,232 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/facet-framework/core/main/schema/plugin-manifest.schema.json",
+  "title": "FACET plugin manifest (plugin.json)",
+  "description": "What a plugin declares about itself: who it is, which host API it needs, where its module is, which surfaces it claims, which tools it asks for and which binary it brings.\n\nA manifest asks; it grants nothing. Every tool, variable and agent tool named here is refused until the host's grants.json for this plugin answers it. The id is taken from the directory the host installed the plugin into, never from this file alone — a manifest that could name itself could claim another plugin's grants.",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version",
+    "api",
+    "entry"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,64}$",
+      "description": "The name the host knows this plugin by. Lowercase letters, digits and '-' only, at most 64 characters. It may not be the id of a plugin the host already ships."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "The name shown in the plugin management."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
+      "description": "The plugin's own version, semver. Independent of the host's."
+    },
+    "api": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The host API this plugin needs. A host that does not offer it does not load the plugin and says which number it offers instead. 0 means the interface is not stable yet and may break."
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]+\\.m?js$",
+      "description": "Path of the ES module inside the package, relative, built JavaScript (.js or .mjs). The module's default export receives the host object. A package arrives built."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "license": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "An SPDX identifier, e.g. MIT."
+    },
+    "homepage": {
+      "type": "string",
+      "pattern": "^https://",
+      "maxLength": 500
+    },
+    "areas": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]{1,64}$"
+      },
+      "uniqueItems": true,
+      "description": "The whole surfaces this plugin claims from the host (areas.register). A second plugin claiming the same name is refused at load."
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "surface.section",
+          "record.panel",
+          "scenario.panel",
+          "header.action"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "The slots this plugin mounts into."
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*\\.[a-z][a-z0-9.-]*$"
+      },
+      "uniqueItems": true,
+      "description": "Every tool this plugin will call through the host bus (bus.call) — host tools such as repo.write, and the tools of its own sidecar. Declared is not granted. The reserved name facet.lint is a tool of the plugin's own sidecar that 'facet lint' calls with the registry's records and the files reads allows, and that answers with findings; like any tool it must be granted."
+    },
+    "ai_tools": {
+      "type": "array",
+      "description": "The subset of tools offered to the agent. Each must also appear in tools, and is granted separately from it.",
+      "items": {
+        "type": "object",
+        "required": [
+          "tool",
+          "description",
+          "input"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "input": {
+            "type": "object",
+            "description": "A JSON Schema object, passed to the model as written."
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "listens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "emits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Every event name must start with this plugin's id and a dot; the bus refuses anything else."
+        }
+      }
+    },
+    "reads": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$"
+          },
+          {
+            "type": "object",
+            "required": [
+              "dir",
+              "ext"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "dir": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$"
+              },
+              "ext": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\.[a-z0-9]{1,10}$",
+                  "not": {
+                    "enum": [
+                      ".env",
+                      ".pem",
+                      ".key",
+                      ".p12",
+                      ".pfx",
+                      ".kdbx",
+                      ".htpasswd"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Directories, relative to the registry root, this plugin may read through the repo.list and repo.read host tools. A plain string reads .md files only. The object form {\"dir\", \"ext\"} names the extensions readable in that directory (for example [\".dmn\"]); each is lowercase, one dot, at most ten characters, and extensions that conventionally hold secrets (.env, .pem, .key, .p12, .pfx, .kdbx, .htpasswd) are refused. A directory absent from here, or a file whose extension the entry does not list, is refused the same way an undeclared tool is. No segment may start with a dot, so \".\", \"..\" and hidden directories are refused; the host checks the same grammar again at every call (facet.ValidReadDir, facet.ValidReadExt) and refuses a directory that resolves outside the repository."
+    },
+    "sidecar": {
+      "type": "object",
+      "required": [
+        "bin",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "description": "A binary this plugin brings. In a package it lies at the root as <bin>-<os>-<arch>, with .exe for windows.",
+      "properties": {
+        "bin": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "The base name. The host appends the platform; never a path."
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "description": "Names of environment variables, never values. The sidecar sees only the intersection of this list and what grants.json allows."
+        },
+        "ai_env": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "description": "The subset of env the sidecar may see when the agent is the caller. Each must also appear in env, and is granted separately under grants.json ai_env; a sidecar started for an agent call sees only the intersection of env, ai_env, grants.env and grants.ai_env. Absent means the agent's sidecar gets no variable."
+        },
+        "sha256": {
+          "type": "object",
+          "description": "Checksum per '<os>-<arch>', written by 'facet plugin pack' from the actual file. A package ships only the platforms it has; an empty map is allowed only for a plugin without a package (one shipped with the host, whose sums the host's build measures).",
+          "propertyNames": {
+            "pattern": "^(linux|darwin|windows)-(amd64|arm64)$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  }
+}
