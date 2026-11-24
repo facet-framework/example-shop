@@ -9,6 +9,8 @@ export interface Invoice {
   billingAddress: Address;
 }
 
+// @facet: billing/invoicing/issue-invoice
+// @facet-role: primary
 /** Issues an invoice and copies the customer's current billing address onto it. */
 export function issueInvoice(orderId: string, customer: Customer, totalCents: number, now = new Date()): Invoice {
   return {

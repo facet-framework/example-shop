@@ -1,3 +1,5 @@
+-- @facet: billing/invoicing/issue-invoice
+-- @facet-role: primary
 CREATE TABLE invoices (
   id                  TEXT PRIMARY KEY,
   order_id            TEXT NOT NULL REFERENCES orders(id),

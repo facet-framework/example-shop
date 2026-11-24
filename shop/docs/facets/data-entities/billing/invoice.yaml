@@ -1,0 +1,15 @@
+schema_version: "0.1"
+id: data/billing/invoice
+canonical_schema:
+  fields:
+    - { name: customer_id, type: uuid, references: data/customers/customer }
+    - { name: billing_street, type: string, constraints: [copied-at-issue, immutable] }
+    - { name: billing_city, type: string, constraints: [copied-at-issue, immutable] }
+retention:
+  policy: Retain for 10 years after issue, unchanged
+  duration: P10Y
+ownership: { team: billing }
+read_by:
+  - billing/invoicing/issue-invoice
+mutated_by:
+  - billing/invoicing/issue-invoice

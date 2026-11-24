@@ -1,0 +1,29 @@
+schema_version: "0.1"
+id: billing/invoicing/issue-invoice
+lifecycle: active
+intent:
+  summary: An order is billed with an invoice that keeps the billing address it was issued to, because an issued invoice may not change.
+  decision_records:
+    - docs/adr/0004-invoice-address-snapshot.md
+contract:
+  scenarios:
+    - id: address-stays-as-issued
+      statement: |
+        Given an invoice issued to Old Street 1
+        When the customer changes the billing address to New Street 2
+        Then the invoice still shows Old Street 1
+    - id: new-invoice-uses-current-address
+      statement: |
+        Given a customer who changed the billing address to New Street 2
+        When the next invoice is issued
+        Then that invoice shows New Street 2
+verification:
+  unit_tests:
+    - id: tests/invoice.test.ts
+      proves: [address-stays-as-issued, new-invoice-uses-current-address]
+lineage:
+  owner:
+    team: billing
+  created_at: "2026-11-23"
+  related_data_entities:
+    - data/billing/invoice
